@@ -148,3 +148,7 @@ tripwire/
 ## License
 
 MIT
+
+## Authors
+
+Mirabel Vuong and Andrew Duong
