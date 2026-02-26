@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  "go\\.sum$",
+  "package-lock\\.json$",
+  "yarn\\.lock$",
+  "pnpm-lock\\.yaml$",
+  "\\.md$",
+  "test/fixtures/",
+  "tests/fixtures/",
+]
