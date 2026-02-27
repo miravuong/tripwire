@@ -1,6 +1,54 @@
 [extend]
 useDefault = true
 
+# --- Custom rules (complement the defaults) ---
+
+# Vault tokens use the "hvs." prefix (service tokens) or "hvb." (batch tokens)
+[[rules]]
+id = "vault-token"
+description = "HashiCorp Vault service or batch token"
+regex = '''\b(hvs\.[a-zA-Z0-9_-]{24,}|hvb\.[a-zA-Z0-9_-]{24,})\b'''
+keywords = ["hvs.", "hvb."]
+
+# Database connection strings with embedded credentials
+[[rules]]
+id = "database-uri"
+description = "Database connection string with embedded password"
+regex = '''(?i)(postgres|postgresql|mysql|mongodb|mongodb\+srv|redis|amqp)://[^:\s]+:[^@\s]+@[^\s]+'''
+keywords = ["postgres", "postgresql", "mysql", "mongodb", "redis", "amqp"]
+
+# Hardcoded password assignments in config/code
+[[rules]]
+id = "hardcoded-password"
+description = "Hardcoded password in assignment"
+regex = '''(?i)(password|passwd|pwd)\s*[:=]\s*['"][^\s'"]{8,}['"]'''
+entropy = 3.5
+keywords = ["password", "passwd", "pwd"]
+
+# Slack incoming webhook URLs
+[[rules]]
+id = "slack-webhook-url"
+description = "Slack incoming webhook URL"
+regex = '''https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[a-zA-Z0-9]{24,}'''
+keywords = ["hooks.slack.com"]
+
+# Kubernetes service account tokens (long base64-encoded JWTs)
+[[rules]]
+id = "kubernetes-sa-token"
+description = "Kubernetes service account token"
+regex = '''(?i)(kubernetes[_-]?token|k8s[_-]?token|sa[_-]?token)\s*[:=]\s*['"]?eyJ[a-zA-Z0-9_-]{50,}'''
+keywords = ["kubernetes", "k8s", "sa_token"]
+
+# Generic webhook URLs with tokens/keys in query parameters
+[[rules]]
+id = "webhook-with-token"
+description = "Webhook URL with token or key in query parameter"
+regex = '''https?://[^\s]*[?&](token|key|secret|api_key|apikey)=[a-zA-Z0-9_-]{16,}'''
+entropy = 3.0
+keywords = ["token=", "key=", "secret=", "api_key=", "apikey="]
+
+# --- Allowlist ---
+
 [allowlist]
 paths = [
   "go\\.sum$",
@@ -10,4 +58,11 @@ paths = [
   "\\.md$",
   "test/fixtures/",
   "tests/fixtures/",
+  "\\.gitleaks\\.toml$",
+]
+regexes = [
+  '''EXAMPLE''',
+  '''PLACEHOLDER''',
+  '''(?i)changeme''',
+  '''(?i)your[_-]?(token|key|secret|password)[_-]?here''',
 ]
