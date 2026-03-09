@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /tripwire .
+RUN CGO_ENABLED=0 go build -o /tripwire ./cmd/alerting
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
