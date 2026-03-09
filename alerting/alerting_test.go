@@ -22,16 +22,26 @@ func testEvent() Event {
 	}
 }
 
-func TestBuildSlackPayload(t *testing.T) {
-	payload := BuildSlackPayload(testEvent())
-	if !strings.Contains(payload.Text, "acme/tripwire") {
-		t.Fatalf("expected repo in summary text, got %q", payload.Text)
+func TestBuildDiscordPayload(t *testing.T) {
+	payload := BuildDiscordPayload(testEvent())
+	if !strings.Contains(payload.Content, "acme/tripwire") {
+		t.Fatalf("expected repo in content, got %q", payload.Content)
 	}
-	if len(payload.Blocks) != 2 {
-		t.Fatalf("expected 2 blocks, got %d", len(payload.Blocks))
+	if len(payload.Embeds) != 1 {
+		t.Fatalf("expected 1 embed, got %d", len(payload.Embeds))
 	}
-	if !strings.Contains(payload.Blocks[1].Text.Text, "aws-access-key-id") {
-		t.Fatalf("expected rule in detail block, got %q", payload.Blocks[1].Text.Text)
+	embed := payload.Embeds[0]
+	if embed.Color != 0xFF0000 {
+		t.Fatalf("expected red color, got %d", embed.Color)
+	}
+	foundRule := false
+	for _, f := range embed.Fields {
+		if f.Name == "Rule" && strings.Contains(f.Value, "aws-access-key-id") {
+			foundRule = true
+		}
+	}
+	if !foundRule {
+		t.Fatal("expected rule field in embed")
 	}
 }
 
@@ -45,8 +55,8 @@ func TestBuildWebhookPayload(t *testing.T) {
 	}
 }
 
-func TestSendSlack(t *testing.T) {
-	var got SlackPayload
+func TestSendDiscord(t *testing.T) {
+	var got DiscordPayload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", r.Method)
@@ -58,16 +68,16 @@ func TestSendSlack(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatalf("decode payload: %v", err)
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
 
 	s := NewSender(srv.Client())
-	if err := s.SendSlack(context.Background(), srv.URL, testEvent()); err != nil {
-		t.Fatalf("SendSlack returned error: %v", err)
+	if err := s.SendDiscord(context.Background(), srv.URL, testEvent()); err != nil {
+		t.Fatalf("SendDiscord returned error: %v", err)
 	}
-	if len(got.Blocks) == 0 {
-		t.Fatal("expected slack blocks in payload")
+	if len(got.Embeds) == 0 {
+		t.Fatal("expected embeds in payload")
 	}
 }
 

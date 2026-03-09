@@ -48,50 +48,54 @@ func (e Event) Validate() error {
 	return nil
 }
 
-type SlackText struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+// DiscordEmbed represents a Discord rich embed object.
+type DiscordEmbed struct {
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Color       int                 `json:"color"`
+	Fields      []DiscordEmbedField `json:"fields"`
+	Timestamp   string              `json:"timestamp,omitempty"`
 }
 
-type SlackBlock struct {
-	Type string    `json:"type"`
-	Text SlackText `json:"text"`
+// DiscordEmbedField represents a field inside a Discord embed.
+type DiscordEmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline"`
 }
 
-type SlackPayload struct {
-	Text   string       `json:"text"`
-	Blocks []SlackBlock `json:"blocks"`
+// DiscordPayload represents the JSON body sent to a Discord webhook.
+type DiscordPayload struct {
+	Content string         `json:"content"`
+	Embeds  []DiscordEmbed `json:"embeds"`
 }
 
-func BuildSlackPayload(event Event) SlackPayload {
+func BuildDiscordPayload(event Event) DiscordPayload {
 	shortSHA := event.CommitSHA
 	if len(shortSHA) > 7 {
 		shortSHA = shortSHA[:7]
 	}
 
-	summary := fmt.Sprintf(
-		":rotating_light: Secret detected in %s on %s (%s)",
-		event.Repository,
-		event.Branch,
-		shortSHA,
-	)
+	summary := fmt.Sprintf("🚨 Secret detected in %s on %s (%s)", event.Repository, event.Branch, shortSHA)
 
-	detail := fmt.Sprintf(
-		"*Repo:* `%s`\n*Branch:* `%s`\n*Commit:* `%s`\n*Rule:* `%s`\n*File:* `%s`\n*Author:* `%s`\n*Detected:* `%s`",
-		event.Repository,
-		event.Branch,
-		event.CommitSHA,
-		event.Rule,
-		event.FilePath,
-		event.Author,
-		event.DetectedAt.UTC().Format(time.RFC3339),
-	)
-
-	return SlackPayload{
-		Text: summary,
-		Blocks: []SlackBlock{
-			{Type: "section", Text: SlackText{Type: "mrkdwn", Text: summary}},
-			{Type: "section", Text: SlackText{Type: "mrkdwn", Text: detail}},
+	return DiscordPayload{
+		Content: summary,
+		Embeds: []DiscordEmbed{
+			{
+				Title:       "Secret Leak Detected",
+				Description: summary,
+				Color:       0xFF0000,
+				Fields: []DiscordEmbedField{
+					{Name: "Repository", Value: fmt.Sprintf("`%s`", event.Repository), Inline: true},
+					{Name: "Branch", Value: fmt.Sprintf("`%s`", event.Branch), Inline: true},
+					{Name: "Commit", Value: fmt.Sprintf("`%s`", event.CommitSHA), Inline: false},
+					{Name: "Rule", Value: fmt.Sprintf("`%s`", event.Rule), Inline: true},
+					{Name: "File", Value: fmt.Sprintf("`%s`", event.FilePath), Inline: true},
+					{Name: "Author", Value: fmt.Sprintf("`%s`", event.Author), Inline: true},
+					{Name: "Detected At", Value: fmt.Sprintf("`%s`", event.DetectedAt.UTC().Format(time.RFC3339)), Inline: false},
+				},
+				Timestamp: event.DetectedAt.UTC().Format(time.RFC3339),
+			},
 		},
 	}
 }
@@ -131,11 +135,11 @@ func NewSender(client *http.Client) *Sender {
 	return &Sender{Client: client}
 }
 
-func (s *Sender) SendSlack(ctx context.Context, webhookURL string, event Event) error {
+func (s *Sender) SendDiscord(ctx context.Context, webhookURL string, event Event) error {
 	if err := event.Validate(); err != nil {
 		return fmt.Errorf("invalid event: %w", err)
 	}
-	return s.sendJSON(ctx, webhookURL, BuildSlackPayload(event))
+	return s.sendJSON(ctx, webhookURL, BuildDiscordPayload(event))
 }
 
 func (s *Sender) SendWebhook(ctx context.Context, webhookURL string, event Event) error {

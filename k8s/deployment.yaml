@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tripwire
+  labels:
+    app: tripwire
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tripwire
+  template:
+    metadata:
+      labels:
+        app: tripwire
+    spec:
+      containers:
+        - name: tripwire
+          image: tripwire:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: tripwire-config
+            - secretRef:
+                name: tripwire-secrets
