@@ -6,13 +6,64 @@ Tripwire is a GitOps-native pipeline that prevents secrets from leaking into ver
 
 ## Architecture
 
-> See the interactive Excalidraw diagram above for the full architecture overview. The pipeline flows through three zones:
+The pipeline flows through three zones:
 
 **Developer Workstation** — `git commit` triggers a pre-commit hook (Gitleaks + TruffleHog). If a secret is found, the commit is blocked locally.
 
 **CI/CD (GitHub Actions)** — If a secret reaches the remote, CI scanning catches it, blocks the PR, and sends a Discord/webhook alert.
 
 **Infrastructure** — HashiCorp Vault manages dynamic, short-lived secrets. A rotation service (cron-scheduled or event-driven) replaces compromised credentials and stores new ones in Vault for downstream consumers.
+
+```mermaid
+flowchart TD
+  A[Developer writes code] --> B[git commit]
+
+  subgraph DEV[Developer Workstation]
+    B --> C[pre-commit hooks]
+    C --> D[Gitleaks staged diff scan]
+    C --> E[TruffleHog entropy/verified scan]
+  end
+
+  D -->|secret found| F[Commit blocked locally]
+  E -->|secret found| F
+  D -->|clean| G[Commit created]
+  E -->|clean| G
+
+  G --> H[git push / open PR]
+
+  subgraph CI[GitHub Actions - secrets-scan workflow]
+    H --> I[Checkout full history fetch-depth 0]
+    I --> J[Gitleaks CI scan]
+    I --> K[TruffleHog CI scan]
+    J -->|findings| L[Workflow fails]
+    K -->|findings| L
+    J -->|clean| M[No finding from Gitleaks]
+    K -->|clean| N[No finding from TruffleHog]
+    M --> O[PR mergeable]
+    N --> O
+  end
+
+  L --> P[Upload SARIF findings]
+  L --> Q[Send Discord/webhook alert]
+  Q --> R[Security team notified]
+  P --> S[Findings visible in GitHub Security]
+
+  R --> T[Developer removes secret + rewrites history]
+  T --> U[Push clean commit]
+  U --> H
+
+  subgraph INFRA[Infrastructure - Planned/In Progress]
+    V[Rotation service]
+    W[Vault dynamic secrets]
+    X[Revoke compromised credentials]
+    Y[Issue/store replacement credentials]
+  end
+
+  L -. detection event .-> V
+  V -. rotate .-> X
+  V -. update .-> Y
+  Y -. store in .-> W
+```
 
 ## Components
 
