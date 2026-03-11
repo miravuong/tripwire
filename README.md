@@ -47,8 +47,9 @@ Instead of storing long-lived credentials in config files or environment variabl
 
 A rotation service that replaces compromised or aging credentials without manual intervention.
 
-- **Scheduled rotation**: A cron job periodically rotates credentials (e.g., every 90 days) through Vault's rotation API or provider-specific CLIs (AWS `iam create-access-key`, GitHub token refresh, etc.).
+- **Scheduled rotation**: A cron job periodically rotates credentials (e.g., every 90 days) through Vault's rotation API or provider-specific logic (AWS `iam create-access-key`, GitHub token refresh, etc.).
 - **Event-driven rotation**: When the CI scanner detects a leaked secret, it publishes an event that triggers immediate rotation of that specific credential.
+- The rotation service is written in Go with a provider interface, making it easy to add new credential types.
 - The rotation service updates the credential in Vault so downstream consumers pick up the new value automatically on their next lease renewal.
 - Old credentials are revoked as part of the rotation to close the exposure window.
 
@@ -56,10 +57,10 @@ A rotation service that replaces compromised or aging credentials without manual
 
 Real-time notifications so the security team knows the moment a secret is detected.
 
-- On detection, the CI workflow sends a payload to a Slack incoming webhook (or any HTTP endpoint).
+- On detection, the Go alerting package (`alerting/`) sends a payload to a Slack incoming webhook (or any HTTP endpoint).
 - The alert includes: repository name, branch, commit SHA, the rule that matched, the file path, and who authored the commit.
 - The actual secret value is **never** included in the alert.
-- Alerts can also be routed to PagerDuty, Opsgenie, or any incident management tool via generic webhook.
+- Alerts can also be routed to PagerDuty, Opsgenie, or any incident management tool via the generic webhook sender.
 
 ## Workflow Walkthrough
 
@@ -88,7 +89,9 @@ If the pre-commit hook was bypassed (e.g., `--no-verify`) and the secret reaches
 
 ```
 tripwire/
-├── .pre-commit-config.yaml          # Pre-commit hook configuration
+├── main.go                           # Application entrypoint
+├── go.mod                            # Go module definition
+├── .pre-commit-config.yaml           # Pre-commit hook configuration
 ├── .gitleaks.toml                    # Gitleaks rules and allowlist
 ├── .github/
 │   └── workflows/
@@ -98,12 +101,12 @@ tripwire/
 │   ├── roles/                        # AppRole / K8s auth role definitions
 │   └── config.hcl                    # Vault server configuration
 ├── rotation/
-│   ├── rotate.sh                     # Rotation entrypoint script
+│   ├── rotation.go                   # Rotation entrypoint and provider interface
 │   ├── providers/                    # Per-provider rotation logic (AWS, GCP, GitHub, etc.)
 │   └── cron.yaml                     # Scheduled rotation definitions
 ├── alerting/
-│   ├── notify.sh                     # Webhook dispatch script
-│   └── templates/                    # Alert message templates (Slack blocks, etc.)
+│   ├── alerting.go                   # Slack and webhook alert dispatching
+│   └── alerting_test.go              # Unit tests for alerting
 └── README.md                         # This file
 ```
 
@@ -113,6 +116,7 @@ tripwire/
 
 | Tool | Purpose | Install |
 |------|---------|---------|
+| [Go](https://go.dev/) | Application language | `brew install go` |
 | [pre-commit](https://pre-commit.com/) | Hook framework | `pip install pre-commit` |
 | [Gitleaks](https://github.com/gitleaks/gitleaks) | Regex-based secret scanner | `brew install gitleaks` |
 | [TruffleHog](https://github.com/trufflesecurity/trufflehog) | Entropy + regex scanner | `brew install trufflehog` |
