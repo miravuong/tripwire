@@ -2,7 +2,7 @@
 
 Tripwire is a GitOps-native pipeline that prevents secrets from leaking into version control, automatically rotates compromised credentials, and alerts your team in real time. It layers multiple defenses — pre-commit hooks, CI scanning, Vault-managed secrets, scheduled rotation, and webhook alerts — so that a leaked secret is caught early and remediated automatically.
 
-> **Status note:** Vault integration and automated rotation are planned/in progress; current implementation focuses on detection, CI enforcement, and Discord/webhook alerting.
+> **Status note:** Event-driven rotation is implemented with a safe default `noop` provider; Vault-backed/provider-specific rotations are in progress.
 
 ## Architecture
 
@@ -157,8 +157,16 @@ tripwire/
 │   └── alerting/
 │       └── main.go                   # Example alert sender entrypoint
 ├── k8s/                              # Kubernetes manifests for local deployment
+├── rotation/
+│   ├── rotation.go                   # Rotation service and provider interface
+│   ├── providers/noop/noop.go        # Safe default simulated rotation provider
+│   └── cron.yaml                     # Scheduled rotation manifest scaffold
 ├── scripts/
 │   └── run-secret-scan-testcases.sh  # Local gitleaks positive/negative test harness
+├── vault/
+│   ├── config.hcl                    # Vault server config scaffold
+│   ├── policies/tripwire.hcl         # Tripwire policy scaffold
+│   └── roles/tripwire-role.json      # AppRole definition scaffold
 └── README.md                         # This file
 ```
 
@@ -174,6 +182,9 @@ tripwire/
 | [TruffleHog](https://github.com/trufflesecurity/trufflehog) | Entropy + regex scanner | `brew install trufflehog` |
 | [HashiCorp Vault](https://www.vaultproject.io/) | Secrets management | `brew install vault` |
 | [GitHub CLI (`gh`)](https://cli.github.com/) | PR / Actions interaction | `brew install gh` |
+| [Docker](https://www.docker.com/) | Container runtime | `brew install --cask docker` |
+| [Minikube](https://minikube.sigs.k8s.io/) | Local Kubernetes cluster | `brew install minikube` |
+| [kubectl](https://kubernetes.io/docs/tasks/tools/) | Kubernetes CLI | `brew install kubectl` |
 
 ### Quick Setup
 
@@ -201,11 +212,102 @@ tripwire/
 
 5. **Configure alerts** — add a `DISCORD_WEBHOOK_URL` secret to your GitHub repo settings so the workflow can send notifications.
 
-6. **Run scanner test cases locally** — validate your Gitleaks rules without committing test secrets:
+6. **Configure event delivery (optional but recommended)** — add `TRIPWIRE_EVENT_WEBHOOK_URL` in GitHub Actions secrets, pointing to your running Tripwire endpoint:
+   ```text
+   https://<your-tripwire-host>/webhook/detection
+   ```
+
+7. **Run scanner test cases locally** — validate your Gitleaks rules without committing test secrets:
    ```bash
    chmod +x scripts/run-secret-scan-testcases.sh
    ./scripts/run-secret-scan-testcases.sh
    ```
+
+### Running the Server Locally
+
+Start the Tripwire HTTP server on your machine:
+
+```bash
+go run main.go
+```
+
+The server listens on `:8080` by default. Override with the `LISTEN_ADDR` environment variable.
+
+| Environment Variable | Purpose |
+|---|---|
+| `LISTEN_ADDR` | Server bind address (default `:8080`) |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL for alert notifications |
+| `ALERT_WEBHOOK_URL` | Generic webhook endpoint for alerts |
+
+Test the server:
+
+```bash
+# Health check
+curl http://localhost:8080/healthz
+
+# Simulate a secret detection event
+curl -X POST http://localhost:8080/webhook/detection \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository": "myorg/myapp",
+    "branch": "main",
+    "commit_sha": "abc1234",
+    "rule": "aws-access-key",
+    "file_path": "config/settings.py",
+    "author": "dev@example.com"
+  }'
+```
+
+### Deploying to Kubernetes (Minikube)
+
+1. **Start Docker and Minikube**
+   ```bash
+   open -a Docker        # macOS — start Docker Desktop
+   minikube start
+   ```
+
+2. **Build the container image inside Minikube's Docker**
+   ```bash
+   eval $(minikube docker-env)
+   docker build -t tripwire:latest .
+   ```
+
+3. **Create the Kubernetes secret** with your credentials:
+   ```bash
+   kubectl create secret generic tripwire-secrets \
+     --from-literal=DISCORD_WEBHOOK_URL='<your-discord-webhook-url>' \
+     --from-literal=VAULT_TOKEN='<your-vault-token>'
+   ```
+
+4. **Apply the manifests**
+   ```bash
+   kubectl apply -f k8s/configmap.yaml \
+                  -f k8s/deployment.yaml \
+                  -f k8s/service.yaml
+   ```
+
+5. **Verify the deployment**
+   ```bash
+   kubectl get pods -l app=tripwire
+   kubectl logs -l app=tripwire
+   ```
+
+6. **Access the service** via port-forward:
+   ```bash
+   kubectl port-forward svc/tripwire 8080:8080
+   ```
+   Then test with the same `curl` commands from the local setup above.
+
+7. **Stop the cluster** when done:
+   ```bash
+   minikube stop
+   ```
+
+### Running Tests
+
+```bash
+go test ./...
+```
 
 ## License
 
