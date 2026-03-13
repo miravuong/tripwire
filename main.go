@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"main/alerting"
+	"main/rotation"
+	"main/rotation/providers/noop"
 )
 
 func main() {
@@ -23,6 +28,7 @@ func main() {
 	// --- Alerting ---
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	sender := alerting.NewSender(httpClient)
+	rotationSvc := rotation.NewService(noop.NewProvider())
 
 	// --- HTTP server for health checks and incoming webhook events ---
 	mux := http.NewServeMux()
@@ -39,34 +45,56 @@ func main() {
 			return
 		}
 
-		// TODO: parse incoming detection event from CI payload
-		// TODO: trigger credential rotation via rotation service
-		// TODO: dispatch alert to configured channels
-
-		discordURL := os.Getenv("DISCORD_WEBHOOK_URL")
-		if discordURL == "" {
-			http.Error(w, "DISCORD_WEBHOOK_URL not configured", http.StatusInternalServerError)
+		event, err := decodeDetectionEvent(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		event := alerting.Event{
-			Repository: r.Header.Get("X-Repository"),
-			Branch:     r.Header.Get("X-Branch"),
-			CommitSHA:  r.Header.Get("X-Commit-SHA"),
-			Rule:       r.Header.Get("X-Rule"),
-			FilePath:   r.Header.Get("X-File-Path"),
-			Author:     r.Header.Get("X-Author"),
-			DetectedAt: time.Now().UTC(),
-		}
-
-		if err := sender.SendDiscord(r.Context(), discordURL, event); err != nil {
-			log.Printf("alert dispatch failed: %v", err)
-			http.Error(w, "alert dispatch failed", http.StatusInternalServerError)
+		results, err := rotationSvc.RotateAll(r.Context(), event)
+		if err != nil {
+			log.Printf("rotation failed: %v", err)
+			http.Error(w, "rotation failed", http.StatusInternalServerError)
 			return
 		}
 
+		alertEvent := alerting.Event{
+			Repository: event.Repository,
+			Branch:     event.Branch,
+			CommitSHA:  event.CommitSHA,
+			Rule:       fallback(event.Rule, "unknown"),
+			FilePath:   fallback(event.FilePath, "unknown"),
+			Author:     fallback(event.Author, "unknown"),
+			DetectedAt: event.DetectedAt,
+		}
+
+		if discordURL := strings.TrimSpace(os.Getenv("DISCORD_WEBHOOK_URL")); discordURL != "" {
+			if err := sender.SendDiscord(r.Context(), discordURL, alertEvent); err != nil {
+				log.Printf("discord alert dispatch failed: %v", err)
+				http.Error(w, "discord alert dispatch failed", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if webhookURL := strings.TrimSpace(os.Getenv("ALERT_WEBHOOK_URL")); webhookURL != "" {
+			if err := sender.SendWebhook(r.Context(), webhookURL, alertEvent); err != nil {
+				log.Printf("generic webhook dispatch failed: %v", err)
+				http.Error(w, "webhook alert dispatch failed", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		response := map[string]any{
+			"status":           "accepted",
+			"rotations_count":  len(results),
+			"rotation_results": results,
+		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		fmt.Fprintln(w, "event received")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("encode response failed: %v", err)
+			return
+		}
 	})
 
 	addr := os.Getenv("LISTEN_ADDR")
@@ -102,4 +130,56 @@ func main() {
 	}
 
 	log.Println("tripwire stopped")
+}
+
+func decodeDetectionEvent(r *http.Request) (rotation.DetectionEvent, error) {
+	event := rotation.DetectionEvent{
+		Repository: strings.TrimSpace(r.Header.Get("X-Repository")),
+		Branch:     strings.TrimSpace(r.Header.Get("X-Branch")),
+		CommitSHA:  strings.TrimSpace(r.Header.Get("X-Commit-SHA")),
+		Rule:       strings.TrimSpace(r.Header.Get("X-Rule")),
+		FilePath:   strings.TrimSpace(r.Header.Get("X-File-Path")),
+		Author:     strings.TrimSpace(r.Header.Get("X-Author")),
+		Source:     "http-header",
+		DetectedAt: time.Now().UTC(),
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return rotation.DetectionEvent{}, fmt.Errorf("read request body: %w", err)
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		if err := event.Validate(); err != nil {
+			return rotation.DetectionEvent{}, fmt.Errorf("invalid detection event: %w", err)
+		}
+		return event, nil
+	}
+
+	var payload rotation.DetectionEvent
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return rotation.DetectionEvent{}, fmt.Errorf("invalid JSON payload: %w", err)
+	}
+
+	payload.Repository = fallback(payload.Repository, event.Repository)
+	payload.Branch = fallback(payload.Branch, event.Branch)
+	payload.CommitSHA = fallback(payload.CommitSHA, event.CommitSHA)
+	payload.Rule = fallback(payload.Rule, event.Rule)
+	payload.FilePath = fallback(payload.FilePath, event.FilePath)
+	payload.Author = fallback(payload.Author, event.Author)
+	payload.Source = fallback(payload.Source, "github-actions")
+	if payload.DetectedAt.IsZero() {
+		payload.DetectedAt = time.Now().UTC()
+	}
+
+	if err := payload.Validate(); err != nil {
+		return rotation.DetectionEvent{}, fmt.Errorf("invalid detection event: %w", err)
+	}
+	return payload, nil
+}
+
+func fallback(primary, secondary string) string {
+	if strings.TrimSpace(primary) != "" {
+		return strings.TrimSpace(primary)
+	}
+	return strings.TrimSpace(secondary)
 }

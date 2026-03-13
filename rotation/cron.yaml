@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tripwire-rotation
+spec:
+  schedule: "0 3 * * 1"
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: rotation
+              image: tripwire:latest
+              command: ["/app/tripwire"]
+              args:
+                - "--mode=rotate"
+              env:
+                - name: ROTATION_ENABLED
+                  value: "true"
