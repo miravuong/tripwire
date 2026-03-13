@@ -76,6 +76,14 @@ func main() {
 			}
 		}
 
+		if slackURL := strings.TrimSpace(os.Getenv("SLACK_WEBHOOK_URL")); slackURL != "" {
+			if err := sender.SendSlack(r.Context(), slackURL, alertEvent); err != nil {
+				log.Printf("slack alert dispatch failed: %v", err)
+				http.Error(w, "slack alert dispatch failed", http.StatusInternalServerError)
+				return
+			}
+		}
+
 		if webhookURL := strings.TrimSpace(os.Getenv("ALERT_WEBHOOK_URL")); webhookURL != "" {
 			if err := sender.SendWebhook(r.Context(), webhookURL, alertEvent); err != nil {
 				log.Printf("generic webhook dispatch failed: %v", err)

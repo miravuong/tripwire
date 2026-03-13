@@ -100,6 +100,57 @@ func BuildDiscordPayload(event Event) DiscordPayload {
 	}
 }
 
+type SlackText struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type SlackBlock struct {
+	Type string    `json:"type"`
+	Text SlackText `json:"text,omitempty"`
+}
+
+type SlackPayload struct {
+	Text   string       `json:"text"`
+	Blocks []SlackBlock `json:"blocks,omitempty"`
+}
+
+func BuildSlackPayload(event Event) SlackPayload {
+	shortSHA := event.CommitSHA
+	if len(shortSHA) > 7 {
+		shortSHA = shortSHA[:7]
+	}
+
+	summary := fmt.Sprintf(":rotating_light: Secret detected in %s on %s (%s)", event.Repository, event.Branch, shortSHA)
+	return SlackPayload{
+		Text: summary,
+		Blocks: []SlackBlock{
+			{
+				Type: "section",
+				Text: SlackText{
+					Type: "mrkdwn",
+					Text: "*Secret Leak Detected*",
+				},
+			},
+			{
+				Type: "section",
+				Text: SlackText{
+					Type: "mrkdwn",
+					Text: fmt.Sprintf("*Repository:* `%s`\n*Branch:* `%s`\n*Commit:* `%s`\n*Rule:* `%s`\n*File:* `%s`\n*Author:* `%s`\n*Detected At:* `%s`",
+						event.Repository,
+						event.Branch,
+						event.CommitSHA,
+						event.Rule,
+						event.FilePath,
+						event.Author,
+						event.DetectedAt.UTC().Format(time.RFC3339),
+					),
+				},
+			},
+		},
+	}
+}
+
 type WebhookPayload struct {
 	Event      string `json:"event"`
 	Repository string `json:"repository"`
@@ -140,6 +191,13 @@ func (s *Sender) SendDiscord(ctx context.Context, webhookURL string, event Event
 		return fmt.Errorf("invalid event: %w", err)
 	}
 	return s.sendJSON(ctx, webhookURL, BuildDiscordPayload(event))
+}
+
+func (s *Sender) SendSlack(ctx context.Context, webhookURL string, event Event) error {
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("invalid event: %w", err)
+	}
+	return s.sendJSON(ctx, webhookURL, BuildSlackPayload(event))
 }
 
 func (s *Sender) SendWebhook(ctx context.Context, webhookURL string, event Event) error {

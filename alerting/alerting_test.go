@@ -55,6 +55,19 @@ func TestBuildWebhookPayload(t *testing.T) {
 	}
 }
 
+func TestBuildSlackPayload(t *testing.T) {
+	payload := BuildSlackPayload(testEvent())
+	if !strings.Contains(payload.Text, "acme/tripwire") {
+		t.Fatalf("expected repo in summary text, got %q", payload.Text)
+	}
+	if len(payload.Blocks) < 2 {
+		t.Fatalf("expected at least 2 blocks, got %d", len(payload.Blocks))
+	}
+	if payload.Blocks[0].Type != "section" {
+		t.Fatalf("expected first block to be section, got %q", payload.Blocks[0].Type)
+	}
+}
+
 func TestSendDiscord(t *testing.T) {
 	var got DiscordPayload
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +91,32 @@ func TestSendDiscord(t *testing.T) {
 	}
 	if len(got.Embeds) == 0 {
 		t.Fatal("expected embeds in payload")
+	}
+}
+
+func TestSendSlack(t *testing.T) {
+	var got SlackPayload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("expected content type application/json, got %q", ct)
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s := NewSender(srv.Client())
+	if err := s.SendSlack(context.Background(), srv.URL, testEvent()); err != nil {
+		t.Fatalf("SendSlack returned error: %v", err)
+	}
+	if len(got.Blocks) == 0 {
+		t.Fatal("expected blocks in Slack payload")
 	}
 }
 

@@ -10,7 +10,7 @@ The pipeline flows through three zones:
 
 **Developer Workstation** — `git commit` triggers a pre-commit hook (Gitleaks + TruffleHog). If a secret is found, the commit is blocked locally.
 
-**CI/CD (GitHub Actions)** — If a secret reaches the remote, CI scanning catches it, blocks the PR, and sends a Discord/webhook alert.
+**CI/CD (GitHub Actions)** — If a secret reaches the remote, CI scanning catches it, blocks the PR, and sends Discord/Slack/webhook alerts.
 
 **Infrastructure** — HashiCorp Vault manages dynamic, short-lived secrets. A rotation service (cron-scheduled or event-driven) replaces compromised credentials and stores new ones in Vault for downstream consumers.
 
@@ -44,7 +44,7 @@ flowchart TD
   end
 
   L --> P[Upload SARIF findings]
-  L --> Q[Send Discord/webhook alert]
+  L --> Q[Send Discord/Slack/webhook alert]
   Q --> R[Security team notified]
   P --> S[Findings visible in GitHub Security]
 
@@ -106,11 +106,11 @@ A rotation service that replaces compromised or aging credentials without manual
 - The rotation service updates the credential in Vault so downstream consumers pick up the new value automatically on their next lease renewal.
 - Old credentials are revoked as part of the rotation to close the exposure window.
 
-### 5. Discord / Webhook Alerts
+### 5. Discord / Slack / Webhook Alerts
 
 Real-time notifications so the security team knows the moment a secret is detected.
 
-- On detection, the Go alerting package (`alerting/`) sends a payload to a Discord webhook (or any HTTP endpoint).
+- On detection, the Go alerting package (`alerting/`) sends payloads to Discord and Slack webhooks (or any HTTP endpoint).
 - The alert includes: repository name, branch, commit SHA, the rule that matched, the file path, and who authored the commit.
 - The actual secret value is **never** included in the alert.
 - Alerts can also be routed to PagerDuty, Opsgenie, or any incident management tool via the generic webhook sender.
@@ -133,7 +133,7 @@ If the pre-commit hook was bypassed (e.g., `--no-verify`) and the secret reaches
 | Step | What happens | Outcome |
 |------|-------------|---------|
 | 5 | CI workflow detects the secret in the pushed commits | Workflow fails, PR is blocked |
-| 6 | Alert sent to Discord with commit details | Security team is notified immediately |
+| 6 | Alert sent to Discord/Slack with commit details | Security team is notified immediately |
 | 7 | Rotation service receives the detection event | The compromised AWS key is rotated via `iam create-access-key` and the old key is deactivated |
 | 8 | New credential is stored in Vault | Downstream services pick up the new key on next lease renewal |
 | 9 | Developer is asked to rewrite history (`git filter-repo`) to scrub the secret from Git | Exposure in version history is eliminated |
@@ -210,7 +210,7 @@ tripwire/
 
 4. **Set up CI** — push to a branch and confirm the `secrets-scan` workflow runs in the Actions tab.
 
-5. **Configure alerts** — add a `DISCORD_WEBHOOK_URL` secret to your GitHub repo settings so the workflow can send notifications.
+5. **Configure alerts** — add `DISCORD_WEBHOOK_URL` and/or `SLACK_WEBHOOK_URL` secrets to your GitHub repo settings so the workflow can send notifications.
 
 6. **Configure event delivery (optional but recommended)** — add `TRIPWIRE_EVENT_WEBHOOK_URL` in GitHub Actions secrets, pointing to your running Tripwire endpoint:
    ```text
