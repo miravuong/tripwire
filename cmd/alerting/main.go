@@ -19,7 +19,7 @@ func main() {
 
 	sender := alerting.NewSender(&http.Client{Timeout: 10 * time.Second})
 	event := alerting.Event{
-		Repository: "acme/tripwire",
+		Repository: "test/trip",
 		Branch:     "main",
 		CommitSHA:  "abc1234def5678",
 		Rule:       "aws-access-key-id",

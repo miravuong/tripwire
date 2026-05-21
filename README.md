@@ -216,6 +216,7 @@ tripwire/
    ```text
    https://<your-tripwire-host>/webhook/detection
    ```
+   Also add `TRIPWIRE_WEBHOOK_TOKEN`; the workflow sends it as a bearer token so unauthenticated requests cannot trigger rotation or alerts.
 
 7. **Run scanner test cases locally** — validate your Gitleaks rules without committing test secrets:
    ```bash
@@ -228,6 +229,7 @@ tripwire/
 Start the Tripwire HTTP server on your machine:
 
 ```bash
+export TRIPWIRE_WEBHOOK_TOKEN='<shared-event-webhook-token>'
 go run main.go
 ```
 
@@ -236,7 +238,9 @@ The server listens on `:8080` by default. Override with the `LISTEN_ADDR` enviro
 | Environment Variable | Purpose |
 |---|---|
 | `LISTEN_ADDR` | Server bind address (default `:8080`) |
+| `TRIPWIRE_WEBHOOK_TOKEN` | Required bearer token for `/webhook/detection` |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL for alert notifications |
+| `SLACK_WEBHOOK_URL` | Slack webhook URL for alert notifications |
 | `ALERT_WEBHOOK_URL` | Generic webhook endpoint for alerts |
 
 Test the server:
@@ -247,6 +251,7 @@ curl http://localhost:8080/healthz
 
 # Simulate a secret detection event
 curl -X POST http://localhost:8080/webhook/detection \
+  -H "Authorization: Bearer $TRIPWIRE_WEBHOOK_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "repository": "myorg/myapp",
@@ -275,6 +280,7 @@ curl -X POST http://localhost:8080/webhook/detection \
 3. **Create the Kubernetes secret** with your credentials:
    ```bash
    kubectl create secret generic tripwire-secrets \
+     --from-literal=TRIPWIRE_WEBHOOK_TOKEN='<shared-event-webhook-token>' \
      --from-literal=DISCORD_WEBHOOK_URL='<your-discord-webhook-url>' \
      --from-literal=VAULT_TOKEN='<your-vault-token>'
    ```
