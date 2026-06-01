@@ -1,0 +1,14 @@
+# Terraform state may contain sensitive values — never commit it.
+*.tfstate
+*.tfstate.*
+
+# Local provider plugins and crash logs.
+.terraform/
+crash.log
+crash.*.log
+
+# Variable files may hold secrets; keep only the example.
+*.tfvars
+!terraform.tfvars.example
+
+# .terraform.lock.hcl is intentionally NOT ignored — commit it to pin providers.

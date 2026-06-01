@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and override as needed. Every value is optional — the
+# defaults match the existing vault/ scaffolds (policy "tripwire", AppRole
+# "tripwire", 1h/4h/24h TTLs). terraform.tfvars is gitignored.
+
+# vault_address       = "https://vault.example.com:8200"  # or rely on $VAULT_ADDR
+
+# Set false if the 'secret/' KV v2 mount already exists (common on dev servers).
+# manage_secret_mount = true
+# secret_mount_path   = "secret"
+
+# token_ttl           = 3600
+# token_max_ttl       = 14400
+# secret_id_ttl       = 86400
+# secret_id_num_uses  = 20
