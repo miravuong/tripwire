@@ -2,7 +2,7 @@
 
 Tripwire is a GitOps-native pipeline that prevents secrets from leaking into version control, automatically rotates compromised credentials, and alerts your team in real time. It layers multiple defenses — pre-commit hooks, CI scanning, Vault-managed secrets, scheduled rotation, and webhook alerts — so that a leaked secret is caught early and remediated automatically.
 
-> **Status note:** Event-driven rotation is implemented with a safe default `noop` provider; Vault-backed/provider-specific rotations are in progress.
+> **Status note:** Event-driven and scheduled rotation entrypoints are implemented with a safe default `noop` provider; Vault-backed/provider-specific rotations are in progress.
 
 ## Architecture
 

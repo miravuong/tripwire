@@ -14,9 +14,9 @@ spec:
           containers:
             - name: rotation
               image: tripwire:latest
-              command: ["/app/tripwire"]
+              command: ["/usr/local/bin/tripwire"]
               args:
-                - "--mode=rotate"
+                - "rotate"
               env:
                 - name: ROTATION_ENABLED
                   value: "true"
