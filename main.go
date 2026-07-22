@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"main/alerting"
 	"main/internal/server"
 	"main/rotation"
+	awsprovider "main/rotation/providers/aws"
 	"main/rotation/providers/noop"
 )
 
@@ -91,7 +93,12 @@ func runServer(ctx context.Context) error {
 
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	sender := alerting.NewSender(httpClient)
-	rotationSvc := rotation.NewService(noop.NewProvider())
+
+	providers, err := buildRotationProviders(ctx)
+	if err != nil {
+		return fmt.Errorf("build rotation providers: %w", err)
+	}
+	rotationSvc := rotation.NewService(providers...)
 
 	handler, err := server.NewHandler(server.Dependencies{
 		Config:   config,
@@ -150,7 +157,11 @@ func runScheduledRotation(ctx context.Context) error {
 		return nil
 	}
 
-	rotationSvc := rotation.NewService(noop.NewProvider())
+	providers, err := buildRotationProviders(ctx)
+	if err != nil {
+		return fmt.Errorf("build rotation providers: %w", err)
+	}
+	rotationSvc := rotation.NewService(providers...)
 	results, err := rotationSvc.RotateAll(ctx, scheduledRotationEvent(time.Now().UTC()))
 	if err != nil {
 		return fmt.Errorf("scheduled rotation: %w", err)
@@ -192,6 +203,43 @@ func scheduledRotationEvent(detectedAt time.Time) rotation.DetectionEvent {
 		Source:     getenvDefault("ROTATION_SOURCE", defaultScheduledSource),
 		DetectedAt: detectedAt,
 	}
+}
+
+// buildRotationProviders assembles the rotation provider chain from the
+// environment. The noop provider is always present; the AWS provider is added
+// when AWS_ROTATION_IAM_USER is set.
+func buildRotationProviders(ctx context.Context) ([]rotation.Provider, error) {
+	providers := []rotation.Provider{noop.NewProvider()}
+
+	iamUser := strings.TrimSpace(os.Getenv("AWS_ROTATION_IAM_USER"))
+	if iamUser == "" {
+		return providers, nil
+	}
+
+	awsProv, err := awsprovider.NewProvider(ctx, awsprovider.Config{
+		IAMUser:      iamUser,
+		RulePrefixes: splitCSV(os.Getenv("AWS_ROTATION_RULE_PREFIXES")),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("aws provider: %w", err)
+	}
+	log.Printf("aws rotation provider enabled for IAM user %q", iamUser)
+	return append(providers, awsProv), nil
+}
+
+func splitCSV(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getenvDefault(key, fallback string) string {

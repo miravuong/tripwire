@@ -2,7 +2,7 @@
 
 Tripwire is a GitOps-native pipeline that prevents secrets from leaking into version control, automatically rotates compromised credentials, and alerts your team in real time. It layers multiple defenses — pre-commit hooks, CI scanning, Vault-managed secrets, scheduled rotation, and webhook alerts — so that a leaked secret is caught early and remediated automatically.
 
-> **Status note:** Event-driven and scheduled rotation entrypoints are implemented with a safe default `noop` provider; Vault-backed/provider-specific rotations are in progress.
+> **Status note:** Event-driven and scheduled rotation entrypoints are wired end to end. The `noop` provider is always active as a safe default, and an AWS IAM provider ships credential rotation for a configured IAM user. GitHub-token and Vault-write providers are in progress.
 
 ## Architecture
 
@@ -103,8 +103,9 @@ A rotation service that replaces compromised or aging credentials without manual
 - **Scheduled rotation**: A cron job periodically rotates credentials (e.g., every 90 days) through Vault's rotation API or provider-specific logic (AWS `iam create-access-key`, GitHub token refresh, etc.).
 - **Event-driven rotation**: When the CI scanner detects a leaked secret, it publishes an event that triggers immediate rotation of that specific credential.
 - The rotation service is written in Go with a provider interface, making it easy to add new credential types.
-- The rotation service updates the credential in Vault so downstream consumers pick up the new value automatically on their next lease renewal.
+- **AWS IAM provider** (`rotation/providers/aws`): When a detection event's rule matches a configured prefix (default `aws-`), the provider creates a new access key for the configured IAM user, deactivates every prior key, and deletes them so the leaked credential is unusable. The new `AccessKeyId` is returned in the rotation result; the plaintext secret is never logged.
 - Old credentials are revoked as part of the rotation to close the exposure window.
+- Planned providers: a GitHub-token rotator and a Vault-write wrapper so downstream consumers pick up new credentials on their next lease renewal.
 
 ### 5. Discord / Slack / Webhook Alerts
 
@@ -160,6 +161,7 @@ tripwire/
 ├── rotation/
 │   ├── rotation.go                   # Rotation service and provider interface
 │   ├── providers/noop/noop.go        # Safe default simulated rotation provider
+│   ├── providers/aws/aws.go          # AWS IAM access-key rotation provider
 │   └── cron.yaml                     # Scheduled rotation manifest scaffold
 ├── scripts/
 │   └── run-secret-scan-testcases.sh  # Local gitleaks positive/negative test harness
@@ -242,6 +244,10 @@ The server listens on `:8080` by default. Override with the `LISTEN_ADDR` enviro
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL for alert notifications |
 | `SLACK_WEBHOOK_URL` | Slack webhook URL for alert notifications |
 | `ALERT_WEBHOOK_URL` | Generic webhook endpoint for alerts |
+| `AWS_ROTATION_IAM_USER` | Enables the AWS provider and names the IAM user whose keys are rotated. Unset = provider disabled. |
+| `AWS_ROTATION_RULE_PREFIXES` | Comma-separated rule prefixes that trigger AWS rotation (default `aws-`). |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE` | Standard AWS SDK credential/region variables. The provider uses the default credential chain, so any supported source (env, shared config, IMDS, IRSA) works. |
+| `ROTATION_ENABLED` | Set to `false` to skip scheduled rotation runs (default `true`). |
 
 Test the server:
 
