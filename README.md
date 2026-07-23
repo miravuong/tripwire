@@ -71,12 +71,35 @@ flowchart TD
 
 A local gate that blocks commits containing secrets before they ever reach the remote.
 
-- **Gitleaks** scans staged diffs against a ruleset of regex patterns (AWS keys, GitHub tokens, private keys, etc.).
+- **Gitleaks** scans staged diffs against a ruleset of regex patterns (AWS keys, GitHub tokens, private keys, etc.). Detection combines regex rules with entropy thresholds and a default allowlist of documented example values — see [Understanding what gets detected (and what doesn't)](#understanding-what-gets-detected-and-what-doesnt) for the full picture.
 - **TruffleHog** adds entropy-based detection to catch secrets that don't match known patterns.
 - Configured via a `.pre-commit-config.yaml` at the repo root using the [pre-commit](https://pre-commit.com/) framework.
 - Runs in under a second on typical diffs so it doesn't slow developers down.
 
 When a secret is detected the commit is rejected with a message identifying the file, line, and rule that matched.
+
+## Understanding what gets detected (and what doesn't)
+
+A secret must clear two independent filters before Gitleaks reports it, and knowing both is essential when you test your installation or triage a missed detection:
+
+**1. Pattern match.** The value must fit a rule's regex: prefix, length, and character set (e.g. `AKIA` + 16 uppercase/digits for AWS access keys).
+
+**2. Entropy and allowlist checks.** Even a pattern match is suppressed if the string has low Shannon entropy (repeated or sequential filler characters) or appears on the default allowlist of well-known documentation values.
+
+We verified this against a live hook installation with three test values:
+
+| Test value | Detected? | Reason |
+|---|---|---|
+| AWS documented example (`AKIAIOSFODNN7...`) | No | Default allowlist excludes official documentation values so tutorials and READMEs don't trigger false positives |
+| `AKIA` + repeated characters | No | Low entropy fails the rule's threshold; it doesn't resemble a real issued key |
+| `AKIA` + random high-entropy suffix | Yes | Matches pattern and entropy profile of a real credential |
+
+Practical implications:
+
+- When testing your hooks, always use a random high-entropy fake. A "test secret" copied from documentation validates nothing.
+- A passing scan on files containing example values is correct behavior, not a miss.
+- TruffleHog in verified-only mode reports only credentials that successfully authenticate against the real service, so fake test values will never appear in its findings. Only Gitleaks results are meaningful for synthetic tests.
+- For systematic validation of the full pipeline, use the companion testbed repo ([twt-repo](https://github.com/miravuong/twt-repo)), which plants detectable high-entropy fakes with a ground-truth manifest.
 
 ### 2. CI Pipeline Scanning (GitHub Actions)
 
@@ -195,12 +218,12 @@ tripwire/
    pre-commit install
    ```
 
-2. **Verify hooks are working** — try committing a test secret:
+2. **Verify hooks are working** — try committing a high-entropy fake in the correct AWS access key ID format. The value must be a random-looking string, not a well-known documentation example, or the default allowlist will let it through:
    ```bash
-   echo 'AKIAIOSFODNN7EXAMPLE' > test.txt
+   echo 'AWS_ACCESS_KEY_ID=AKIA2E4XM7Q9JZ5T8B3W' > test.txt
    git add test.txt && git commit -m "test"
    # Expected: commit blocked by Gitleaks
-   rm test.txt
+   git reset HEAD~1 && rm test.txt
    ```
 
 3. **Configure Vault** (requires a running Vault instance):
